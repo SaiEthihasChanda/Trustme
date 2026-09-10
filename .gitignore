@@ -8,6 +8,7 @@ __pycache__/
 *.egg-info/
 python/build/
 python/dist/
+python/*.egg-info/
 
 # JavaScript
 node_modules/

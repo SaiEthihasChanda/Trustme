@@ -1,7 +1,7 @@
 """Read secrets from TrustMe.
 
-    import trustme
-    key = trustme.get("STRIPE_API_KEY")
+    import trustme_secrets
+    key = trustme_secrets.get("STRIPE_API_KEY")
 
 The private key never leaves this process and is never sent anywhere. Each
 request is authenticated with a freshly signed, single-use assertion that
@@ -190,7 +190,12 @@ def _resolve_password() -> str:
 
     # No terminal, so this is a pipeline: take the password from stdin, which
     # unlike a command-line flag does not show up in the process list.
+    # No tty: a pipeline, or an IDE that redirected the streams. Stdin is the
+    # only route left, and the prompt has to be printed explicitly - without it
+    # an IDE run just hangs with no hint that anything is waiting for input.
+    print("TrustMe key file password: ", end="", file=sys.stderr, flush=True)
     line = sys.stdin.readline().rstrip(chr(13) + chr(10))
+    print(file=sys.stderr)
     if line:
         return line
 
