@@ -1,0 +1,16 @@
+# Java
+java/target/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+python/build/
+python/dist/
+
+# JavaScript
+node_modules/
+
+# Never commit a credential file
+*.TM
+*.tm

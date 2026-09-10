@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.saiethihaschanda</groupId>
+  <artifactId>trustme</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>TrustMe</name>
+  <description>Read application secrets from TrustMe with a single call. The private key stays in your process and each request is authenticated with a short-lived, single-use signed assertion.</description>
+  <url>https://trustme-33ab7.web.app</url>
+
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/licenses/MIT</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>saiethihaschanda</id>
+      <name>Saiet Hihaschanda</name>
+      <email>saiethihaschanda@gmail.com</email>
+      <url>https://github.com/SaiEthihasChanda</url>
+    </developer>
+  </developers>
+
+  <scm>
+    <url>https://github.com/SaiEthihasChanda/Trustme</url>
+    <connection>scm:git:https://github.com/SaiEthihasChanda/Trustme.git</connection>
+    <developerConnection>scm:git:git@github.com:SaiEthihasChanda/Trustme.git</developerConnection>
+  </scm>
+
+  <properties>
+    <maven.compiler.release>11</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
+      <version>1.78.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.3.1</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals><goal>jar-no-fork</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.6.3</version>
+        <configuration>
+          <doclint>none</doclint>
+          <quiet>true</quiet>
+        </configuration>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals><goal>jar</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-gpg-plugin</artifactId>
+        <version>3.2.4</version>
+        <executions>
+          <execution>
+            <id>sign-artifacts</id>
+            <phase>verify</phase>
+            <goals><goal>sign</goal></goals>
+            <configuration>
+              <gpgArguments>
+                <arg>--pinentry-mode</arg>
+                <arg>loopback</arg>
+              </gpgArguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.sonatype.central</groupId>
+        <artifactId>central-publishing-maven-plugin</artifactId>
+        <version>0.7.0</version>
+        <extensions>true</extensions>
+        <configuration>
+          <publishingServerId>central</publishingServerId>
+          <!-- Uploads and validates, then waits for a deliberate release click
+               in the portal. A published version can never be withdrawn, so the
+               pause is worth having. -->
+          <autoPublish>false</autoPublish>
+          <!-- Stop at 'uploaded'. Polling for 'validated' trips a parse bug in
+               plugin 0.7.0, which does not know about the 'warnings' field the
+               Central API now returns. Validation status is checked separately. -->
+          <waitUntil>uploaded</waitUntil>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
