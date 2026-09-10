@@ -1,5 +1,6 @@
 # Java
 java/target/
+spring/target/
 
 # Python
 __pycache__/

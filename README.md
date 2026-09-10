@@ -22,7 +22,7 @@ application.
 <dependency>
   <groupId>io.github.saiethihaschanda</groupId>
   <artifactId>trustme</artifactId>
-  <version>0.2.0</version>
+  <version>0.2.1</version>
 </dependency>
 ```
 
@@ -54,6 +54,39 @@ key = trustme.get("STRIPE_API_KEY")
 import trustme from "trustme-secrets";
 const key = await trustme.get("STRIPE_API_KEY");
 ```
+
+## Spring Boot
+
+Add the starter instead of the plain library:
+
+```xml
+<dependency>
+  <groupId>io.github.saiethihaschanda</groupId>
+  <artifactId>trustme-spring</artifactId>
+  <version>0.1.0</version>
+</dependency>
+```
+
+Then refer to secrets directly in `application.properties`:
+
+```properties
+trustme.key-file=C:/Users/you/.trustme/billing-service.TM
+
+jwt.secret=${trustme.secret.JWT_SECRET}
+spring.datasource.password=${trustme.secret.DB_PASSWORD}
+```
+
+Existing `@Value("${jwt.secret}")` injection needs no change, including in
+constructors: the secrets are installed before any bean is created.
+
+Only the secrets you actually reference are fetched. Anything already set in
+application.properties, the environment or on the command line still wins, so a
+local override works without touching TrustMe. `trustme.enabled=false` turns the
+whole thing off.
+
+Because this runs before the Spring banner, a password prompt appears there too.
+For unattended services supply it the usual way, for example
+`-Dtrustme.password-file=/run/secrets/tm`.
 
 ## Supplying the key file and password
 
@@ -147,6 +180,7 @@ Argon2id-derived key protecting the file, not on the format being secret.
 | Path | |
 | --- | --- |
 | `java/` | published to Maven Central |
+| `spring/` | Spring Boot starter, published to Maven Central |
 | `python/` | published to PyPI |
 | `javascript/` | published to npm |
 
