@@ -39,7 +39,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ._tmfile import TmFile, TrustMeError, load
 
-__all__ = ["get", "using", "TrustMe", "TrustMeError"]
+__all__ = ["get", "using", "use_key_file", "TrustMe", "TrustMeError"]
 
 _SECRET_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _ASSERTION_LIFETIME = 60
@@ -115,19 +115,21 @@ class TrustMe:
         return signing_input.decode("ascii") + "." + _b64url(raw)
 
 
-def _option(name: str) -> Optional[str]:
+def _option(name: str, *aliases: str) -> Optional[str]:
     """Reads a ``-X name=value`` interpreter option, or a ``--name=value`` argument.
 
     ``-X`` is preferred because it never collides with the application's own
     argument parsing.
     """
-    value = sys._xoptions.get(name)
-    if isinstance(value, str) and value:
-        return value
-    flag = "--" + name.replace("_", "-") + "="
-    for arg in sys.argv[1:]:
-        if arg.startswith(flag):
-            return arg[len(flag):]
+    for key in (name, *aliases):
+        value = sys._xoptions.get(key)
+        if isinstance(value, str) and value:
+            return value
+    for key in (name, *aliases):
+        flag = "--" + key.replace("_", "-") + "="
+        for arg in sys.argv[1:]:
+            if arg.startswith(flag):
+                return arg[len(flag):]
     return None
 
 
@@ -139,7 +141,7 @@ def _key_files_here() -> list[Path]:
 
 
 def _resolve_key_file() -> Path:
-    configured = _option("trustme_keyfile")
+    configured = _option("trustme_keyfile", "trustme_key_file")
     if configured:
         path = Path(configured.strip())
         if not path.is_file():
@@ -247,6 +249,19 @@ def using(key_file: Optional[str | Path] = None, password: Optional[str] = None)
 # Resolved once per process. Standard input in particular can only be read once,
 # so a second get() must not go looking for the password again.
 _defaults: dict[str, object] = {}
+
+
+def use_key_file(key_file: str | Path) -> None:
+    """Points :func:`get` at a specific key file.
+
+    Use this instead of relying on ``-X trustme_keyfile`` or on finding a single
+    .TM file in the working directory. The password is still asked for, or read
+    from stdin, on first use.
+    """
+    path = Path(key_file)
+    if not path.is_file():
+        raise TrustMeError(f"No such key file: {key_file}")
+    _defaults["key_file"] = path
 
 
 def get(secret_name: str) -> str:
