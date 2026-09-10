@@ -6,7 +6,7 @@
 
   <groupId>io.github.saiethihaschanda</groupId>
   <artifactId>trustme</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <packaging>jar</packaging>
 
   <name>TrustMe</name>
@@ -46,6 +46,13 @@
       <groupId>org.bouncycastle</groupId>
       <artifactId>bcprov-jdk18on</artifactId>
       <version>1.78.1</version>
+    </dependency>
+    <!-- Windows DPAPI, for the unlock-once-per-machine key cache. Unused on
+         other platforms, where the cache simply stays disabled. -->
+    <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna-platform</artifactId>
+      <version>5.14.0</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -100,12 +107,6 @@
             <id>sign-artifacts</id>
             <phase>verify</phase>
             <goals><goal>sign</goal></goals>
-            <configuration>
-              <gpgArguments>
-                <arg>--pinentry-mode</arg>
-                <arg>loopback</arg>
-              </gpgArguments>
-            </configuration>
           </execution>
         </executions>
       </plugin>

@@ -22,7 +22,7 @@ application.
 <dependency>
   <groupId>io.github.saiethihaschanda</groupId>
   <artifactId>trustme</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
@@ -100,6 +100,33 @@ process list, not a file on disk.
 
 The key file and password are resolved once per process, so stdin is read at most
 once no matter how many secrets you fetch.
+
+## Unlocking once per machine (Windows)
+
+The first run asks for the password. The unlocked key is then remembered for your
+Windows account, so later runs of the same application start without a prompt:
+
+```
+$ java -jar billing-service.jar
+TrustMe key file password: ********      <- first run only
+
+$ java -jar billing-service.jar          <- no prompt
+```
+
+The key is sealed with DPAPI under CurrentUser scope and written to
+`%LOCALAPPDATA%\TrustMe\keys\`. Another Windows account cannot read it, and
+copying the file to another machine yields nothing.
+
+**Understand what this trades away.** A decrypted key now sits on disk, usable by
+any process running as you, with no password. That is the same bargain
+`ssh-agent` makes, and it is weaker than being asked every time. Turn it off with
+`-Dtrustme.cache=false`, or clear it:
+
+```java
+TrustMe.forget("C:/path/app.TM");
+```
+
+On macOS and Linux there is no cache and every run asks for the password.
 
 ## How it works
 
