@@ -136,8 +136,8 @@ once no matter how many secrets you fetch.
 
 ## Unlocking once per machine (Windows)
 
-The first run asks for the password. The unlocked key is then remembered for your
-Windows account, so later runs of the same application start without a prompt:
+In all three languages, the first run asks for the password. The unlocked key is
+then remembered for your Windows account, so later runs start without a prompt:
 
 ```
 $ java -jar billing-service.jar
@@ -147,19 +147,20 @@ $ java -jar billing-service.jar          <- no prompt
 ```
 
 The key is sealed with DPAPI under CurrentUser scope and written to
-`%LOCALAPPDATA%\TrustMe\keys\`. Another Windows account cannot read it, and
+`%LOCALAPPDATA%\TrustMe\keys\`. Java uses JNA, Python calls DPAPI through
+`ctypes`, and Node goes through PowerShell's ProtectedData - none of them add a
+dependency you did not already have. Another Windows account cannot read it, and
 copying the file to another machine yields nothing.
 
 **Understand what this trades away.** A decrypted key now sits on disk, usable by
 any process running as you, with no password. That is the same bargain
 `ssh-agent` makes, and it is weaker than being asked every time. Turn it off with
-`-Dtrustme.cache=false`, or clear it:
+`-Dtrustme.cache=false` / `-X trustme_cache=false` / `--trustme-cache=false`, or
+clear it with `forget(path)` in any of the three.
 
-```java
-TrustMe.forget("C:/path/app.TM");
-```
-
-On macOS and Linux there is no cache and every run asks for the password.
+If caching ever fails you are told why on stderr, and the debug flag
+(`-Dtrustme.debug=true`, `-X trustme_debug`, `--trustme-debug`) traces each
+lookup. On macOS and Linux there is no cache and every run asks.
 
 ## How it works
 

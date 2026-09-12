@@ -1,11 +1,11 @@
 {
   "name": "trustme-secrets",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Read application secrets from TrustMe with a single call.",
   "type": "module",
   "main": "index.js",
   "exports": { ".": "./index.js" },
-  "files": ["index.js", "tmfile.js", "README.md"],
+  "files": ["index.js", "tmfile.js", "keycache.js", "README.md"],
   "engines": { "node": ">=18" },
   "license": "MIT",
   "homepage": "https://trustme-33ab7.web.app",

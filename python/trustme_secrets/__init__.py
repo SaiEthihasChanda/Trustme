@@ -37,13 +37,14 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from . import _keycache
 from ._tmfile import TmFile, TrustMeError, load
 
-__all__ = ["get", "using", "use_key_file", "TrustMe", "TrustMeError"]
+__all__ = ["get", "using", "use_key_file", "forget", "TrustMe", "TrustMeError"]
 
 _SECRET_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _ASSERTION_LIFETIME = 60
-_cache: dict[tuple[str, str], "TrustMe"] = {}
+_cache: dict = {}
 
 
 def _b64url(raw: bytes) -> str:
@@ -207,9 +208,14 @@ def _resolve_password() -> str:
     )
 
 
-def _unlock(path: Path, password: str) -> TrustMe:
-    file = load(path)
+def _from_pkcs8(file: TmFile, pkcs8: bytes) -> TrustMe:
+    private_key = serialization.load_der_private_key(pkcs8, password=None)
+    if not isinstance(private_key, ec.EllipticCurvePrivateKey):
+        raise TrustMeError("Key file does not contain a usable P-256 key.")
+    return TrustMe(file, private_key)
 
+
+def _decrypt(file: TmFile, path: Path, password: str) -> bytes:
     derived = hash_secret_raw(
         secret=password.encode("utf-8"),
         salt=file.salt,
@@ -219,31 +225,55 @@ def _unlock(path: Path, password: str) -> TrustMe:
         hash_len=32,
         type=Type.ID,
     )
-
     try:
         # The GCM tag doubles as the password check: a wrong password fails here
         # rather than producing plausible-looking rubbish.
-        pkcs8 = AESGCM(derived).decrypt(file.nonce, file.ciphertext + file.tag, None)
+        return AESGCM(derived).decrypt(file.nonce, file.ciphertext + file.tag, None)
     except Exception:
         raise TrustMeError(f"Incorrect password for {Path(path).name}.") from None
 
-    private_key = serialization.load_der_private_key(pkcs8, password=None)
-    if not isinstance(private_key, ec.EllipticCurvePrivateKey):
-        raise TrustMeError("Key file does not contain a usable P-256 key.")
-    return TrustMe(file, private_key)
+
+def _unlock(path: Path, password: str) -> TrustMe:
+    file = load(path)
+    pkcs8 = _decrypt(file, path, password)
+    _keycache.store(file.key_id, pkcs8)      # remember for next run
+    return _from_pkcs8(file, pkcs8)
 
 
 def using(key_file: Optional[str | Path] = None, password: Optional[str] = None) -> TrustMe:
-    """Opens a key file, reusing an already-unlocked one where possible."""
-    path = Path(key_file) if key_file else _resolve_key_file()
-    secret = password if password is not None else _resolve_password()
+    """Opens a key file.
 
-    # The password forms part of the cache key so presenting a different one
-    # re-runs the unlock and fails, rather than reusing an earlier success.
-    cache_key = (str(path.resolve()), hashlib.sha256(secret.encode("utf-8")).hexdigest())
+    Without a password, a key this machine already remembers is used directly;
+    otherwise the password is asked for, read from stdin, or taken from the
+    command line. With an explicit password the file is always unlocked with it,
+    so a wrong one fails rather than reusing an earlier success.
+    """
+    path = Path(key_file) if key_file else _resolve_key_file()
+
+    if password is None:
+        slot = str(path.resolve())
+        if slot not in _cache:
+            # The header is plaintext, so the key id is readable without
+            # unlocking anything - that is what makes a cache lookup possible
+            # before prompting.
+            file = load(path)
+            remembered = _keycache.load(file.key_id)
+            _cache[slot] = (_from_pkcs8(file, remembered) if remembered is not None
+                            else _unlock(path, _resolve_password()))
+        return _cache[slot]
+
+    cache_key = (str(path.resolve()), hashlib.sha256(password.encode("utf-8")).hexdigest())
     if cache_key not in _cache:
-        _cache[cache_key] = _unlock(path, secret)
+        _cache[cache_key] = _unlock(path, password)
     return _cache[cache_key]
+
+
+def forget(key_file: str | Path) -> bool:
+    """Forgets a key this machine has remembered, so the next run asks again."""
+    path = Path(key_file)
+    file = load(path)
+    _cache.pop(str(path.resolve()), None)
+    return _keycache.forget(file.key_id)
 
 
 # Resolved once per process. Standard input in particular can only be read once,
@@ -268,6 +298,4 @@ def get(secret_name: str) -> str:
     """Fetches a secret using the default key file and password."""
     if "key_file" not in _defaults:
         _defaults["key_file"] = _resolve_key_file()
-    if "password" not in _defaults:
-        _defaults["password"] = _resolve_password()
-    return using(_defaults["key_file"], _defaults["password"]).fetch(secret_name)
+    return using(_defaults["key_file"]).fetch(secret_name)

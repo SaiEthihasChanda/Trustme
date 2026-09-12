@@ -4,6 +4,7 @@ import { basename, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { argon2id } from "hash-wasm";
 import { loadTmFile, TrustMeError } from "./tmfile.js";
+import * as keycache from "./keycache.js";
 
 export { TrustMeError };
 
@@ -123,12 +124,16 @@ function ask(prompt, hidden) {
 }
 
 function readLineFromStdin() {
+  // No tty: a pipeline, or an IDE that redirected the streams. The prompt has
+  // to be printed explicitly or an IDE run just hangs with no hint.
+  process.stderr.write("TrustMe key file password: ");
   return new Promise((done) => {
     const rl = createInterface({ input: process.stdin, terminal: false });
     let settled = false;
     rl.once("line", (line) => {
       settled = true;
       rl.close();
+      process.stderr.write("\n");
       done(line);
     });
     rl.once("close", () => {
@@ -191,9 +196,13 @@ async function resolvePassword() {
   );
 }
 
-async function unlock(path, password) {
-  const file = await loadTmFile(path);
+function fromPkcs8(file, pkcs8) {
+  const privateKey = createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" });
+  pkcs8.fill(0);
+  return new TrustMe(file, privateKey);
+}
 
+async function decrypt(file, path, password) {
   const derived = await argon2id({
     password,
     salt: file.salt,
@@ -203,34 +212,57 @@ async function unlock(path, password) {
     hashLength: 32,
     outputType: "binary",
   });
-
-  let pkcs8;
   try {
     // The GCM tag doubles as the password check: a wrong password fails here
     // rather than producing plausible-looking rubbish.
     const decipher = createDecipheriv("aes-256-gcm", Buffer.from(derived), file.nonce);
     decipher.setAuthTag(file.tag);
-    pkcs8 = Buffer.concat([decipher.update(file.ciphertext), decipher.final()]);
+    return Buffer.concat([decipher.update(file.ciphertext), decipher.final()]);
   } catch {
     throw new TrustMeError("Incorrect password for " + basename(path) + ".");
   }
-
-  const privateKey = createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" });
-  pkcs8.fill(0);
-  return new TrustMe(file, privateKey);
 }
 
-/** Opens a key file, reusing an already-unlocked one where possible. */
+async function unlock(path, password) {
+  const file = await loadTmFile(path);
+  const pkcs8 = await decrypt(file, path, password);
+  keycache.store(file.keyId, pkcs8);   // remember for next run
+  return fromPkcs8(file, pkcs8);
+}
+
+/**
+ * Opens a key file. Without a password, a key this machine already remembers is
+ * used directly; otherwise the password is asked for, read from stdin, or taken
+ * from the command line. With an explicit password the file is always unlocked
+ * with it, so a wrong one fails rather than reusing an earlier success.
+ */
 export async function using(keyFile, password) {
   const path = keyFile ?? (await resolveKeyFile());
-  const secret = password ?? (await resolvePassword());
 
-  // The password forms part of the cache key so presenting a different one
-  // re-runs the unlock and fails, rather than reusing an earlier success.
-  const cacheKey = resolve(path) + " " + createHash("sha256").update(secret).digest("hex");
+  if (password === undefined) {
+    const slot = resolve(path);
+    if (!cache.has(slot)) {
+      // The header is plaintext, so the key id is readable without unlocking
+      // anything - that is what makes a cache lookup possible before prompting.
+      const file = await loadTmFile(path);
+      const remembered = keycache.load(file.keyId);
+      cache.set(slot, remembered
+        ? fromPkcs8(file, remembered)
+        : await unlock(path, await resolvePassword()));
+    }
+    return cache.get(slot);
+  }
 
-  if (!cache.has(cacheKey)) cache.set(cacheKey, await unlock(path, secret));
+  const cacheKey = resolve(path) + " " + createHash("sha256").update(password).digest("hex");
+  if (!cache.has(cacheKey)) cache.set(cacheKey, await unlock(path, password));
   return cache.get(cacheKey);
+}
+
+/** Forgets a key this machine has remembered, so the next run asks again. */
+export async function forget(keyFile) {
+  const file = await loadTmFile(keyFile);
+  cache.delete(resolve(keyFile));
+  return keycache.forget(file.keyId);
 }
 
 // Resolved once per process. Standard input in particular can only be read once,
@@ -239,11 +271,8 @@ let defaults;
 
 /** Fetches a secret using the default key file and password. */
 export async function get(secretName) {
-  if (!defaults) {
-    defaults = { keyFile: await resolveKeyFile(), password: await resolvePassword() };
-  }
-  const tm = await using(defaults.keyFile, defaults.password);
-  return tm.fetch(secretName);
+  if (!defaults) defaults = { keyFile: await resolveKeyFile() };
+  return (await using(defaults.keyFile)).fetch(secretName);
 }
 
-export default { get, using, TrustMeError };
+export default { get, using, forget, TrustMeError };

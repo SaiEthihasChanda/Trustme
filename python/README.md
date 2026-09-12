@@ -46,6 +46,33 @@ python -X trustme_keyfile=C:/path/app.TM app.py
 python app.py --trustme-key-file=C:/path/app.TM
 ```
 
+## Unlocking once per machine (Windows)
+
+The first run asks for the password. The unlocked key is then remembered for your
+Windows account, so later runs start without a prompt:
+
+```
+$ python app.py
+TrustMe key file password: ********      <- first run only
+
+$ python app.py                          <- no prompt
+```
+
+The key is sealed with DPAPI under CurrentUser scope, called directly through
+`ctypes`, and written to `%LOCALAPPDATA%\TrustMe\keys\`. Another account cannot
+read it, and copying the file to another machine yields nothing.
+
+**Understand what this trades away.** A decrypted key now sits on disk, usable by
+any process running as you, with no password. That is the same bargain
+`ssh-agent` makes. Turn it off with `-X trustme_cache=false`, or clear it:
+
+```python
+trustme_secrets.forget("C:/path/app.TM")
+```
+
+If caching ever fails you are told why on stderr, and `-X trustme_debug` traces
+each lookup. On macOS and Linux there is no cache and every run asks.
+
 ## Supplying the key file and password
 
 Run your application normally and it asks for anything it is missing:
@@ -76,8 +103,8 @@ who can list processes — on Linux `/proc/<pid>/cmdline` is world readable.
 `--trustme-password=` on the command line also works, but `-X` is safer because
 it never collides with your own argument parsing.
 
-The key file and password are resolved once per process, so stdin is read at
-most once no matter how many secrets you fetch.
+The key file is resolved once per process, and the password only when the
+machine cache has nothing for it, so stdin is read at most once.
 
 ## Licence
 
