@@ -32,6 +32,12 @@ final class KeyCache {
         return !"false".equalsIgnoreCase(System.getProperty("trustme.cache", "true"));
     }
 
+    private static final boolean DEBUG = Boolean.getBoolean("trustme.debug");
+
+    private static void debug(String message) {
+        if (DEBUG) System.err.println("TrustMe: " + message);
+    }
+
     private static Path directory() {
         String base = System.getenv("LOCALAPPDATA");
         if (base == null || base.isEmpty()) {
@@ -46,14 +52,24 @@ final class KeyCache {
 
     /** Returns the remembered private key for this key id, or null. */
     static byte[] load(String keyId) {
-        if (!enabled()) return null;
+        if (!enabled()) {
+            debug("cache disabled (" + (WINDOWS ? "-Dtrustme.cache=false" : "not Windows") + ")");
+            return null;
+        }
         Path path = fileFor(keyId);
-        if (!Files.isRegularFile(path)) return null;
+        if (!Files.isRegularFile(path)) {
+            debug("no cached key at " + path);
+            return null;
+        }
         try {
-            return Crypt32Util.cryptUnprotectData(Files.readAllBytes(path));
+            byte[] key = Crypt32Util.cryptUnprotectData(Files.readAllBytes(path));
+            debug("using cached key from " + path);
+            return key;
         } catch (Exception e) {
-            // Unreadable because it belongs to another account, is corrupt, or
-            // DPAPI refused it. Treat as absent and fall back to the password.
+            // Belongs to another account, corrupt, or DPAPI refused it. Fall back
+            // to the password, but say so: a silent miss looks like a broken cache.
+            System.err.println("TrustMe: cached key at " + path + " could not be read ("
+                    + e.getClass().getSimpleName() + ": " + e.getMessage() + "); asking for the password.");
             return null;
         }
     }
@@ -62,12 +78,18 @@ final class KeyCache {
     static void store(String keyId, byte[] privateKey) {
         if (!enabled()) return;
         byte[] sealed = null;
+        Path path = fileFor(keyId);
         try {
             Files.createDirectories(directory());
             sealed = Crypt32Util.cryptProtectData(privateKey);
-            Files.write(fileFor(keyId), sealed);
-        } catch (IOException | RuntimeException e) {
-            // Caching is an optimisation; carry on without it.
+            Files.write(path, sealed);
+            debug("remembered key at " + path);
+        } catch (IOException | RuntimeException | LinkageError e) {
+            // Caching is an optimisation and must not fail the unlock, but a
+            // silent failure means every run prompts with no explanation.
+            System.err.println("TrustMe: could not remember the key on this machine ("
+                    + e.getClass().getSimpleName() + ": " + e.getMessage()
+                    + "). You will be asked for the password on every run.");
         } finally {
             if (sealed != null) Arrays.fill(sealed, (byte) 0);
         }
