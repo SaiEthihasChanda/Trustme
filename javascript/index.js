@@ -56,7 +56,7 @@ class TrustMe {
       } catch {
         // leave the raw body as the reason
       }
-      throw new TrustMeError("TrustMe refused the request: " + reason);
+      throw new TrustMeError(this.describe(String(reason), secretName));
     }
 
     const payload = JSON.parse(body);
@@ -64,6 +64,35 @@ class TrustMe {
       throw new TrustMeError("Malformed response from TrustMe.");
     }
     return payload.value;
+  }
+
+  // Turns a server error code into something a person can act on. The secret
+  // name is always included: a bare "not found" is useless when a config file
+  // references a dozen of them.
+  describe(code, secretName) {
+    const app = this.file.appId;
+    const q = JSON.stringify(secretName);
+    const a = JSON.stringify(app);
+    switch (code) {
+      case "secret_not_found":
+        return "Secret " + q + " does not exist in application " + a + ". Add it in the TrustMe console.";
+      case "key_revoked":
+        return "The key file for application " + a + " has been revoked (while fetching " + q
+          + "). Generate a new one in the TrustMe console.";
+      case "unknown_key":
+        return "The key file for application " + a + " is not registered with TrustMe (while fetching "
+          + q + "). Generate a new one in the TrustMe console.";
+      case "bad_signature":
+        return "TrustMe rejected the request for " + q + ": the signature did not verify."
+          + " The key file may not match what the console holds for " + a + ".";
+      case "replay_detected":
+      case "bad_lifetime":
+        return "TrustMe rejected the request for " + q + " (" + code + "). Check that this machine's clock is correct.";
+      case "decrypt_failed":
+        return "TrustMe could not decrypt " + q + " on the server. This is a server-side problem, not something in your application.";
+      default:
+        return "TrustMe refused the request for " + q + " in application " + a + ": " + code;
+    }
   }
 
   buildAssertion() {

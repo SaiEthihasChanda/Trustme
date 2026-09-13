@@ -86,13 +86,40 @@ class TrustMe:
                 reason = json.loads(detail).get("error", detail)
             except json.JSONDecodeError:
                 reason = detail
-            raise TrustMeError(f"TrustMe refused the request: {reason}") from None
+            raise TrustMeError(self._describe(str(reason), secret_name)) from None
         except urllib.error.URLError as exc:
             raise TrustMeError(f"Could not reach TrustMe: {exc.reason}") from exc
 
         if "value" not in payload:
             raise TrustMeError("Malformed response from TrustMe.")
         return payload["value"]
+
+    def _describe(self, code: str, secret_name: str) -> str:
+        """Turns a server error code into something a person can act on.
+
+        The secret name is always included: a bare "not found" is useless when
+        a config file references a dozen of them.
+        """
+        app = self._file.app_id
+        if code == "secret_not_found":
+            return (f'Secret "{secret_name}" does not exist in application "{app}". '
+                    "Add it in the TrustMe console.")
+        if code == "key_revoked":
+            return (f'The key file for application "{app}" has been revoked (while fetching '
+                    f'"{secret_name}"). Generate a new one in the TrustMe console.')
+        if code == "unknown_key":
+            return (f'The key file for application "{app}" is not registered with TrustMe (while '
+                    f'fetching "{secret_name}"). Generate a new one in the TrustMe console.')
+        if code == "bad_signature":
+            return (f'TrustMe rejected the request for "{secret_name}": the signature did not verify. '
+                    f'The key file may not match what the console holds for "{app}".')
+        if code in ("replay_detected", "bad_lifetime"):
+            return (f'TrustMe rejected the request for "{secret_name}" ({code}). '
+                    "Check that this machine's clock is correct.")
+        if code == "decrypt_failed":
+            return (f'TrustMe could not decrypt "{secret_name}" on the server. This is a server-side '
+                    "problem, not something in your application.")
+        return f'TrustMe refused the request for "{secret_name}" in application "{app}": {code}'
 
     def _assertion(self) -> str:
         now = int(time.time())

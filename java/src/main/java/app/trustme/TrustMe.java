@@ -167,13 +167,48 @@ public final class TrustMe {
 
         if (response.statusCode() != 200) {
             String reason = Json.string(response.body(), "error");
-            throw new TrustMeException("TrustMe refused the request: "
-                    + (reason != null ? reason : "HTTP " + response.statusCode()));
+            throw new TrustMeException(describe(
+                    reason != null ? reason : "HTTP " + response.statusCode(), secretName));
         }
 
         String value = Json.string(response.body(), "value");
         if (value == null) throw new TrustMeException("Malformed response from TrustMe.");
         return value;
+    }
+
+    /**
+     * Turns a server error code into something a person can act on. The secret
+     * name is always included: a bare "not found" is useless when a config file
+     * references a dozen of them.
+     */
+    private String describe(String code, String secretName) {
+        String app = file.appId;
+        String quoted = "\"" + secretName + "\"";
+        String appQuoted = "\"" + app + "\"";
+        switch (code) {
+            case "secret_not_found":
+                return "Secret " + quoted + " does not exist in application " + appQuoted
+                        + ". Add it in the TrustMe console.";
+            case "key_revoked":
+                return "The key file for application " + appQuoted + " has been revoked (while fetching "
+                        + quoted + "). Generate a new one in the TrustMe console.";
+            case "unknown_key":
+                return "The key file for application " + appQuoted + " is not registered with TrustMe"
+                        + " (while fetching " + quoted + "). Generate a new one in the TrustMe console.";
+            case "bad_signature":
+                return "TrustMe rejected the request for " + quoted + ": the signature did not verify."
+                        + " The key file may not match what the console holds for " + appQuoted + ".";
+            case "replay_detected":
+            case "bad_lifetime":
+                return "TrustMe rejected the request for " + quoted + " (" + code
+                        + "). Check that this machine's clock is correct.";
+            case "decrypt_failed":
+                return "TrustMe could not decrypt " + quoted + " on the server. This is a server-side"
+                        + " problem, not something in your application.";
+            default:
+                return "TrustMe refused the request for " + quoted + " in application " + appQuoted
+                        + ": " + code;
+        }
     }
 
     /** The application id this key file belongs to. */
