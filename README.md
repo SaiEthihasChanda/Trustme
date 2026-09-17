@@ -134,10 +134,10 @@ process list, not a file on disk.
 The key file and password are resolved once per process, so stdin is read at most
 once no matter how many secrets you fetch.
 
-## Unlocking once per machine (Windows)
+## Unlocking once per machine (Windows and Linux)
 
 In all three languages, the first run asks for the password. The unlocked key is
-then remembered for your Windows account, so later runs start without a prompt:
+then remembered for your account, so later runs start without a prompt:
 
 ```
 $ java -jar billing-service.jar
@@ -146,21 +146,41 @@ TrustMe key file password: ********      <- first run only
 $ java -jar billing-service.jar          <- no prompt
 ```
 
-The key is sealed with DPAPI under CurrentUser scope and written to
+**On Windows** the key is sealed with DPAPI under CurrentUser scope and written to
 `%LOCALAPPDATA%\TrustMe\keys\`. Java uses JNA, Python calls DPAPI through
 `ctypes`, and Node goes through PowerShell's ProtectedData - none of them add a
 dependency you did not already have. Another Windows account cannot read it, and
 copying the file to another machine yields nothing.
 
-**Understand what this trades away.** A decrypted key now sits on disk, usable by
-any process running as you, with no password. That is the same bargain
-`ssh-agent` makes, and it is weaker than being asked every time. Turn it off with
-`-Dtrustme.cache=false` / `-X trustme_cache=false` / `--trustme-cache=false`, or
-clear it with `forget(path)` in any of the three.
+**On Linux** there is no OS-backed secret store guaranteed to be present - no
+desktop session, no keyring daemon, especially headless or in a container - so
+the key is instead sealed with AES-256-GCM under a key derived from
+`/etc/machine-id` (falling back to `/var/lib/dbus/machine-id`), and written to
+`$XDG_CACHE_HOME/trustme/keys/` (or `~/.cache/trustme/keys/`) with the directory
+and file both restricted to `0600`/`0700`. Copying the file to another machine
+still yields nothing, since the machine id it was sealed under won't match. But
+unlike DPAPI, the boundary against another account on the same machine is only
+the filesystem permission, not an OS secret store - so it's weaker in the face
+of anyone who can read past that permission (root, a misconfigured umask, a
+backup that preserves file contents but not modes). If no machine id is present
+at all, the cache is silently disabled for that run rather than falling back to
+something weaker.
+
+**Understand what this trades away, on either platform.** A decrypted key now
+sits on disk, usable by any process running as you, with no password. That is
+the same bargain `ssh-agent` makes, and it is weaker than being asked every
+time. Turn it off with `-Dtrustme.cache=false` / `-X trustme_cache=false` /
+`--trustme-cache=false`, or clear it with `forget(path)` in any of the three.
 
 If caching ever fails you are told why on stderr, and the debug flag
 (`-Dtrustme.debug=true`, `-X trustme_debug`, `--trustme-debug`) traces each
-lookup. On macOS and Linux there is no cache and every run asks.
+lookup. On macOS there is no cache and every run asks.
+
+Caching generally isn't useful inside ephemeral containers, since there's
+nothing "next run" to remember across — a fresh container is a fresh cache. It
+matters more on a persistent Linux dev machine or server. In Docker, prefer
+supplying the password via `-Dtrustme.password-file=...` (or the `-X`/`--`
+equivalent) pointed at a mounted secret, so no run ever prompts at all.
 
 ## How it works
 

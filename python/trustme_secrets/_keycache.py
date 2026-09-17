@@ -1,21 +1,35 @@
-"""Remembers an unlocked private key for this Windows account.
+"""Remembers an unlocked private key for this account.
 
-The key is sealed with DPAPI under CurrentUser scope, so another account on the
-same machine cannot read it and copying the file elsewhere yields nothing. Any
-process running as you can use it, which is the same bargain ssh-agent makes.
+On Windows the key is sealed with DPAPI under CurrentUser scope: another
+account on the same machine cannot read it, and copying the file elsewhere
+yields nothing.
 
-On anything other than Windows the cache is disabled and every run asks.
+On Linux there is no OS-backed secret store guaranteed to be present - no
+desktop session, no keyring daemon, especially headless or in a container -
+so the key is instead sealed with AES-256-GCM under a key derived from
+/etc/machine-id, and the file is restricted to this user with 0600
+permissions. That reproduces "copying the file elsewhere yields nothing", but
+the boundary against another account on the same machine is the filesystem
+permission, not an OS secret store.
+
+Either way, any process running as you can use the cached key, which is the
+same bargain ssh-agent makes.
+
+On anything else (macOS) the cache is disabled and every run asks.
 """
 
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Optional
 
 _WINDOWS = sys.platform == "win32"
+_LINUX = sys.platform.startswith("linux")
 _CRYPTPROTECT_UI_FORBIDDEN = 0x01
 
 
@@ -31,7 +45,7 @@ def _option(name: str) -> Optional[str]:
 
 
 def enabled() -> bool:
-    if not _WINDOWS:
+    if not _WINDOWS and not _LINUX:
         return False
     return (_option("trustme_cache") or "true").lower() != "false"
 
@@ -45,8 +59,11 @@ def _debug(message: str) -> None:
 
 
 def _directory() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    return Path(base) / "TrustMe" / "keys"
+    if _WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "TrustMe" / "keys"
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "trustme" / "keys"
 
 
 def _file_for(key_id: str) -> Path:
@@ -84,20 +101,49 @@ if _WINDOWS:
         return _dpapi(_crypt32.CryptUnprotectData, data)
 
 
+def _linux_machine_key() -> bytes:
+    """A key derived from this machine's id, so a cached file copied elsewhere
+    decrypts to nothing - standing in for the OS secret store DPAPI gives
+    Windows. Tries systemd's machine-id, then the older D-Bus one.
+    """
+    for candidate in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            machine_id = Path(candidate).read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if machine_id:
+            return hashlib.sha256(("trustme-linux-cache:" + machine_id).encode("utf-8")).digest()
+    raise OSError("no /etc/machine-id or /var/lib/dbus/machine-id")
+
+
+def _linux_protect(data: bytes) -> bytes:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = _linux_machine_key()
+    nonce = os.urandom(12)
+    return nonce + AESGCM(key).encrypt(nonce, data, None)
+
+
+def _linux_unprotect(data: bytes) -> bytes:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = _linux_machine_key()
+    nonce, sealed = data[:12], data[12:]
+    return AESGCM(key).decrypt(nonce, sealed, None)
+
+
 def load(key_id: str) -> Optional[bytes]:
     """Returns the remembered private key for this key id, or None."""
     if not enabled():
-        _debug("cache disabled (" + ("-X trustme_cache=false" if _WINDOWS else "not Windows") + ")")
+        _debug("cache disabled (" + ("-X trustme_cache=false" if (_WINDOWS or _LINUX) else "not Windows or Linux") + ")")
         return None
     path = _file_for(key_id)
     if not path.is_file():
         _debug(f"no cached key at {path}")
         return None
     try:
-        key = _unprotect(path.read_bytes())
+        key = _unprotect(path.read_bytes()) if _WINDOWS else _linux_unprotect(path.read_bytes())
         _debug(f"using cached key from {path}")
         return key
-    except Exception as exc:  # another account, corrupt, or DPAPI refused it
+    except Exception as exc:  # another account/machine, corrupt, or the seal was refused
         print(f"TrustMe: cached key at {path} could not be read ({type(exc).__name__}: {exc}); "
               "asking for the password.", file=sys.stderr)
         return None
@@ -109,8 +155,18 @@ def store(key_id: str, private_key: bytes) -> None:
         return
     path = _file_for(key_id)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(_protect(private_key))
+        directory = path.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        if not _WINDOWS:
+            os.chmod(directory, stat.S_IRWXU)  # rwx------
+        sealed = _protect(private_key) if _WINDOWS else _linux_protect(private_key)
+        # Open with the final mode from the start so the key is never briefly
+        # readable by anyone other than this user.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, sealed)
+        finally:
+            os.close(fd)
         _debug(f"remembered key at {path}")
     except Exception as exc:
         print(f"TrustMe: could not remember the key on this machine ({type(exc).__name__}: {exc}). "
