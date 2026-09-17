@@ -1,6 +1,6 @@
 {
   "name": "trustme-secrets",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Read application secrets from TrustMe with a single call.",
   "type": "module",
   "main": "index.js",
