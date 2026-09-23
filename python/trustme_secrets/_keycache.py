@@ -162,7 +162,11 @@ def store(key_id: str, private_key: bytes) -> None:
         sealed = _protect(private_key) if _WINDOWS else _linux_protect(private_key)
         # Open with the final mode from the start so the key is never briefly
         # readable by anyone other than this user.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        # O_BINARY matters on Windows: os.open defaults to text mode there,
+        # which rewrites every 0x0A in the sealed blob as 0x0D 0x0A and makes
+        # it undecryptable. The flag does not exist on POSIX.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags, 0o600)
         try:
             os.write(fd, sealed)
         finally:
